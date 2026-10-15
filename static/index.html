@@ -231,7 +231,7 @@ function fmtBytes(b) {
   if (!b) return "";
   const u = ["B","KB","MB","GB"]; let i = 0;
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-  return (i >= 2 ? b.toFixed(1) : Math.round(b)) + " " + u[i];
+  return (i === 3 ? b.toFixed(2) : i === 2 ? b.toFixed(1) : Math.round(b)) + " " + u[i];
 }
 function fmtDuration(s) {
   if (!s) return "";
@@ -326,7 +326,7 @@ function renderFormats() {
     return `<div class="fmt" data-id="${esc(f.id)}">
       <span class="badge ${esc(badgeCls)}">${esc(f.badge)}</span>
       <div><div class="name">${esc(f.label)}</div><div class="sub">${sub}</div></div>
-      <span class="size">${f.size ? "~" + fmtBytes(f.size) : ""}</span>
+      <span class="size" title="${f.size ? f.size.toLocaleString() + " bytes" + (f.exact ? "" : " (estimate)") : ""}">${f.size ? (f.exact ? "" : "~") + fmtBytes(f.size) : ""}</span>
       <button class="btn" data-dl="${esc(f.id)}">Download</button>
       <span class="bar"></span>
     </div>`;

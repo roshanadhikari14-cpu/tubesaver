@@ -78,51 +78,71 @@ def base_opts():
     return opts
 
 
-def size_of(fmt):
-    return fmt.get("filesize") or fmt.get("filesize_approx") or 0
+FORMAT_ID_RE = re.compile(r"^[\w-]{1,32}$")
+# H.264 plays everywhere, AV1 next (still MP4), VP9 last
+CODEC_RANK = {"avc1": 3, "av01": 2, "vp09": 1, "vp9": 1}
+
+
+def size_of(fmt, duration=None):
+    """Return (bytes, exact). Falls back to bitrate x duration when YouTube gives no size."""
+    if fmt.get("filesize"):
+        return fmt["filesize"], True
+    if fmt.get("filesize_approx"):
+        return fmt["filesize_approx"], False
+    if fmt.get("tbr") and duration:
+        return int(fmt["tbr"] * 1000 / 8 * duration), False
+    return 0, False
 
 
 def build_options(info):
     """Collapse yt-dlp's raw format list into one choice per resolution."""
-    formats = info.get("formats") or []
+    formats = [f for f in (info.get("formats") or []) if "-drc" not in str(f.get("format_id"))]
+    duration = info.get("duration")
+    # Direct (https) formats carry exact byte sizes; HLS streams don't, so skip those when possible
+    direct = [f for f in formats if f.get("protocol") in ("https", "http")]
+    formats = direct or formats
+
     audios = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") not in (None, "none")]
-    best_audio = max(audios, key=lambda f: f.get("abr") or 0, default=None)
-    audio_size = size_of(best_audio) if best_audio else 0
+    m4a = [f for f in audios if f.get("ext") == "m4a"]
+    best_audio = max(m4a or audios, key=lambda f: f.get("abr") or 0, default=None)
+    audio_size, audio_exact = size_of(best_audio, duration) if best_audio else (0, True)
 
     by_height = {}
     for f in formats:
         h = f.get("height")
         if not h or f.get("vcodec") in (None, "none"):
             continue
-        current = by_height.get(h)
-        # prefer higher fps, then mp4/avc for compatibility, then bitrate
-        score = (f.get("fps") or 0, f.get("ext") == "mp4", f.get("tbr") or 0)
-        if current is None or score > current[0]:
+        codec = (f.get("vcodec") or "").split(".")[0]
+        score = (f.get("fps") or 0, CODEC_RANK.get(codec, 0), bool(f.get("filesize")), f.get("tbr") or 0)
+        if h not in by_height or score > by_height[h][0]:
             by_height[h] = (score, f)
 
     video = []
     for h in sorted(by_height, reverse=True):
         f = by_height[h][1]
         has_audio = f.get("acodec") not in (None, "none")
+        vsize, vexact = size_of(f, duration)
         video.append({
-            "id": f"v{h}",
+            "id": f"v-{f['format_id']}" + ("" if has_audio or not best_audio else f"+{best_audio['format_id']}"),
             "kind": "video",
             "height": h,
             "label": f"{h}p",
             "badge": "8K" if h >= 4320 else "4K" if h >= 2160 else "2K" if h >= 1440 else "HD" if h >= 720 else "SD",
             "fps": int(f.get("fps") or 0),
             "codec": (f.get("vcodec") or "").split(".")[0],
-            "size": size_of(f) + (0 if has_audio else audio_size),
+            "size": vsize + (0 if has_audio else audio_size),
+            "exact": vexact and (has_audio or audio_exact),
         })
 
     audio = []
     if best_audio:
         audio.append({"id": "mp3", "kind": "audio", "label": "MP3", "badge": "AUDIO",
-                      "detail": "192 kbps", "size": audio_size})
-        audio.append({"id": "m4a", "kind": "audio", "label": "M4A", "badge": "AUDIO",
-                      "detail": f"{int(best_audio.get('abr') or 0)} kbps original", "size": audio_size})
+                      "detail": "192 kbps", "size": int(192000 / 8 * duration) if duration else 0, "exact": False})
+        audio.append({"id": f"a-{best_audio['format_id']}", "kind": "audio", "label": best_audio.get("ext", "m4a").upper(),
+                      "badge": "AUDIO", "detail": f"{int(best_audio.get('abr') or 0)} kbps original",
+                      "size": audio_size, "exact": audio_exact})
     audio.append({"id": "thumb", "kind": "image", "label": "Thumbnail", "badge": "JPG",
-                  "detail": "Highest quality", "size": 0})
+                  "detail": "Highest quality", "size": 0, "exact": False})
     return video, audio
 
 
@@ -203,19 +223,16 @@ def run_job(job_id, url, choice):
     opts["progress_hooks"] = [on_progress]
     opts["postprocessor_hooks"] = [on_post]
 
-    if choice.startswith("v") and choice[1:].isdigit():
-        h = int(choice[1:])
-        if FFMPEG_DIR:
-            opts["format"] = (f"bestvideo[height={h}][ext=mp4]+bestaudio[ext=m4a]/"
-                              f"bestvideo[height={h}]+bestaudio/best[height={h}]")
-            opts["merge_output_format"] = "mp4"
-        else:
-            opts["format"] = f"best[height={h}][acodec!=none]/best[height<={h}][acodec!=none]"
+    ids = choice[2:].split("+")
+    if choice.startswith("v-") and all(FORMAT_ID_RE.match(i) for i in ids):
+        # download exactly the formats whose size was shown, falling back if YouTube rotated them
+        opts["format"] = "+".join(ids) + "/" + ids[0] + "+bestaudio/" + ids[0]
+        opts["merge_output_format"] = "mp4"
     elif choice == "mp3":
         opts["format"] = "bestaudio/best"
         opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
-    elif choice == "m4a":
-        opts["format"] = "bestaudio[ext=m4a]/bestaudio"
+    elif choice.startswith("a-") and FORMAT_ID_RE.match(choice[2:]):
+        opts["format"] = choice[2:] + "/bestaudio[ext=m4a]/bestaudio"
     elif choice == "thumb":
         opts.update(skip_download=True, writethumbnail=True)
         if FFMPEG_DIR:
