@@ -23,6 +23,8 @@ YOUTUBE_RE = re.compile(r"^https?://([a-z0-9-]+\.)?(youtube\.com|youtu\.be|youtu
 app = Flask(__name__, static_folder="static")
 jobs = {}
 jobs_lock = threading.Lock()
+# downloads beyond this many wait in a queue so batch downloads don't saturate the connection
+download_slots = threading.Semaphore(2)
 
 
 # ---------- helpers ----------
@@ -196,8 +198,35 @@ def info():
     )
 
 
+@app.get("/api/playlist")
+def playlist():
+    """List the videos in a playlist without fetching each one's formats."""
+    url = request.args.get("url", "")
+    if not valid_url(url):
+        return jsonify(error="Please paste a valid YouTube link."), 400
+    opts = base_opts()
+    opts.update(noplaylist=False, extract_flat="in_playlist", playlistend=200)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            data = ydl.extract_info(url, download=False)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        return jsonify(error=msg), 400
+    entries = [
+        {"id": e["id"], "title": e.get("title"), "url": f"https://www.youtube.com/watch?v={e['id']}"}
+        for e in (data.get("entries") or []) if e and e.get("id")
+    ]
+    return jsonify(title=data.get("title"), entries=entries)
+
+
 def run_job(job_id, url, choice):
+    with download_slots:
+        run_download(job_id, url, choice)
+
+
+def run_download(job_id, url, choice):
     job = jobs[job_id]
+    job["status"] = "starting"
     folder = download_folder()
     opts = base_opts()
     opts["outtmpl"] = os.path.join(folder, "%(title).150B [%(id)s].%(ext)s")
@@ -265,7 +294,7 @@ def download():
         return jsonify(error="MP3 needs FFmpeg. Install it and restart the app."), 400
     job_id = uuid.uuid4().hex[:12]
     with jobs_lock:
-        jobs[job_id] = {"status": "starting", "percent": 0, "stage": 0, "filename": None}
+        jobs[job_id] = {"status": "queued", "percent": 0, "stage": 0, "filename": None}
     threading.Thread(target=run_job, args=(job_id, url, choice), daemon=True).start()
     return jsonify(job=job_id)
 
