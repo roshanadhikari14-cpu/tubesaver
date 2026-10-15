@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TubeSaver</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0b12;
+    --panel: rgba(255,255,255,0.045);
+    --panel-2: rgba(255,255,255,0.07);
+    --border: rgba(255,255,255,0.09);
+    --text: #f4f4f8;
+    --muted: #9a9ab0;
+    --accent: #ff3b5c;
+    --accent-2: #ff8a3d;
+    --ok: #2ecc8f;
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before, body::after {
+    content: ""; position: fixed; z-index: -1; border-radius: 50%;
+    filter: blur(120px); opacity: .45; pointer-events: none;
+  }
+  body::before { width: 520px; height: 520px; background: #ff3b5c; top: -180px; left: -140px; }
+  body::after  { width: 480px; height: 480px; background: #6b4dff; bottom: -200px; right: -120px; opacity: .35; }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 16px 80px; }
+
+  header { text-align: center; margin-bottom: 36px; }
+  .logo { display: inline-flex; align-items: center; gap: 12px; font-weight: 800; font-size: 28px; letter-spacing: -.5px; }
+  .logo-mark {
+    width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 8px 30px rgba(255,59,92,.45);
+  }
+  .logo-mark svg { width: 22px; height: 22px; fill: #fff; }
+  header p { color: var(--muted); margin: 10px 0 0; font-size: 15px; }
+
+  .search {
+    display: flex; gap: 10px; padding: 8px; border-radius: 20px;
+    background: var(--panel); border: 1px solid var(--border);
+    backdrop-filter: blur(20px); transition: border-color .2s, box-shadow .2s;
+  }
+  .search:focus-within { border-color: rgba(255,59,92,.6); box-shadow: 0 0 0 4px rgba(255,59,92,.12); }
+  .search input {
+    flex: 1; min-width: 0; background: transparent; border: 0; outline: 0;
+    color: var(--text); font: inherit; font-size: 16px; padding: 12px 14px;
+  }
+  .search input::placeholder { color: #6c6c82; }
+  .btn {
+    border: 0; cursor: pointer; font: inherit; font-weight: 600; font-size: 14px;
+    border-radius: 14px; padding: 12px 20px; color: #fff; white-space: nowrap;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 6px 20px rgba(255,59,92,.35); transition: transform .15s, filter .15s, opacity .15s;
+  }
+  .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
+  .btn.ghost { background: var(--panel-2); box-shadow: none; border: 1px solid var(--border); }
+
+  .error {
+    margin-top: 14px; padding: 12px 16px; border-radius: 12px; font-size: 14px;
+    background: rgba(255,59,92,.1); border: 1px solid rgba(255,59,92,.35); color: #ffb3c0;
+  }
+
+  /* ---------- result card ---------- */
+  .card {
+    margin-top: 28px; display: grid; grid-template-columns: 380px 1fr; gap: 28px;
+    padding: 22px; border-radius: var(--radius);
+    background: var(--panel); border: 1px solid var(--border); backdrop-filter: blur(20px);
+    animation: rise .35s ease-out;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+  .thumb {
+    position: relative; aspect-ratio: 16/9; border-radius: 14px; overflow: hidden;
+    background: #1a1a24; box-shadow: 0 18px 40px rgba(0,0,0,.45);
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .4s; }
+  .thumb img.loaded { opacity: 1; }
+  .duration {
+    position: absolute; right: 10px; bottom: 10px; padding: 3px 8px; border-radius: 6px;
+    background: rgba(0,0,0,.8); font-size: 12px; font-weight: 600;
+  }
+  .meta h2 { font-size: 20px; line-height: 1.35; margin: 16px 0 8px; font-weight: 700; }
+  .channel { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .channel .dot { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, #6b4dff, var(--accent)); }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip { font-size: 12px; padding: 5px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); color: #cfcfe0; }
+
+  /* skeletons */
+  .sk { background: linear-gradient(90deg, #1c1c27 0%, #2a2a38 50%, #1c1c27 100%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; border-radius: 8px; }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .sk.line { height: 16px; margin: 10px 0; }
+
+  .tabs { display: flex; gap: 6px; padding: 5px; border-radius: 14px; background: rgba(0,0,0,.25); width: fit-content; margin-bottom: 16px; }
+  .tab { background: transparent; border: 0; color: var(--muted); font: inherit; font-weight: 600; font-size: 13px; padding: 8px 16px; border-radius: 10px; cursor: pointer; }
+  .tab.active { background: var(--panel-2); color: var(--text); }
+
+  .formats { display: flex; flex-direction: column; gap: 10px; }
+  .fmt {
+    position: relative; overflow: hidden;
+    display: grid; grid-template-columns: 64px 1fr auto auto; align-items: center; gap: 14px;
+    padding: 12px 12px 12px 14px; border-radius: 14px;
+    background: rgba(255,255,255,.03); border: 1px solid var(--border); transition: border-color .2s, background .2s;
+  }
+  .fmt:hover { border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.05); }
+  .badge {
+    font-size: 11px; font-weight: 800; letter-spacing: .5px; text-align: center;
+    padding: 6px 0; border-radius: 8px; background: var(--panel-2); color: #cfcfe0;
+  }
+  .badge.HD { background: rgba(46,204,143,.15); color: #6ff0bd; }
+  .badge.K2, .badge.K4, .badge.K8 { background: linear-gradient(135deg, rgba(255,59,92,.25), rgba(255,138,61,.25)); color: #ffc2a8; }
+  .badge.AUDIO { background: rgba(107,77,255,.18); color: #bdb0ff; }
+  .badge.JPG { background: rgba(61,180,255,.15); color: #9fd8ff; }
+  .fmt .name { font-weight: 700; font-size: 15px; }
+  .fmt .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .fmt .size { color: #cfcfe0; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .fmt .btn { padding: 9px 16px; font-size: 13px; }
+  .fmt .bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .3s; }
+  .fmt.done .bar { background: var(--ok); }
+  .fmt .btn.saved { background: rgba(46,204,143,.15); color: #6ff0bd; box-shadow: none; border: 1px solid rgba(46,204,143,.35); }
+  .sk.fmtrow { height: 62px; border-radius: 14px; }
+
+  .warn { font-size: 12px; color: #ffcf8a; margin-top: 12px; }
+
+  footer.bar {
+    margin-top: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 14px 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); font-size: 13px; color: var(--muted);
+  }
+  footer.bar input {
+    flex: 1; min-width: 180px; background: rgba(0,0,0,.25); border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font: inherit; padding: 9px 12px; outline: 0;
+  }
+  footer.bar input:focus { border-color: rgba(255,59,92,.6); }
+  footer.bar .btn { padding: 9px 14px; font-size: 13px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: #1d1d29; border: 1px solid var(--border); padding: 12px 18px; border-radius: 12px; font-size: 14px;
+    transition: all .25s; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,.4); max-width: calc(100% - 32px);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .hidden { display: none !important; }
+
+  @media (max-width: 820px) {
+    .card { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .wrap { padding-top: 28px; }
+    .search { flex-wrap: wrap; }
+    .search input { flex-basis: 100%; }
+    .search .btn { flex: 1; }
+    .fmt { grid-template-columns: 54px 1fr auto; }
+    .fmt .size { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <span class="logo-mark"><svg viewBox="0 0 24 24"><path d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42L11 13.6V4a1 1 0 0 1 1-1Zm-7 15a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"/></svg></span>
+      TubeSaver
+    </div>
+    <p>Paste a YouTube link, pick a quality and save it straight to your drive.</p>
+  </header>
+
+  <form class="search" id="form" autocomplete="off">
+    <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+    <button type="button" class="btn ghost" id="pasteBtn">Paste</button>
+    <button type="submit" class="btn" id="fetchBtn">Fetch</button>
+  </form>
+  <div id="error" class="error hidden"></div>
+
+  <section id="result" class="card hidden">
+    <div>
+      <div class="thumb" id="thumbBox">
+        <div class="sk" style="position:absolute;inset:0" id="thumbSk"></div>
+        <img id="thumb" alt="Video thumbnail">
+        <span class="duration hidden" id="duration"></span>
+      </div>
+      <div class="meta">
+        <h2 id="title"><div class="sk line" style="width:90%"></div><div class="sk line" style="width:60%"></div></h2>
+        <div class="channel"><span class="dot"></span><span id="channel"><span class="sk" style="display:inline-block;width:120px;height:14px"></span></span></div>
+        <div class="stats" id="stats"></div>
+      </div>
+    </div>
+    <div>
+      <div class="tabs">
+        <button class="tab active" data-tab="video">Video</button>
+        <button class="tab" data-tab="audio">Audio &amp; image</button>
+      </div>
+      <div class="formats" id="formats"></div>
+      <div class="warn hidden" id="ffWarn">FFmpeg wasn't found, so only resolutions with built-in audio are available and MP3 is disabled.</div>
+    </div>
+  </section>
+
+  <footer class="bar">
+    <span>Save to</span>
+    <input id="folder" spellcheck="false">
+    <button class="btn ghost" id="saveFolder">Change</button>
+    <button class="btn ghost" id="openFolder">Open folder</button>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const ID_RE = /(?:v=|youtu\.be\/|shorts\/|embed\/|live\/|\/v\/)([\w-]{11})/;
+let current = { url: null, data: null, tab: "video", token: 0 };
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
+}
+function showError(msg) { $("error").textContent = msg; $("error").classList.toggle("hidden", !msg); }
+function fmtBytes(b) {
+  if (!b) return "";
+  const u = ["B","KB","MB","GB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i >= 2 ? b.toFixed(1) : Math.round(b)) + " " + u[i];
+}
+function fmtDuration(s) {
+  if (!s) return "";
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60), sec = Math.floor(s%60);
+  return (h ? h + ":" + String(m).padStart(2,"0") : m) + ":" + String(sec).padStart(2,"0");
+}
+function fmtNum(n) { return n == null ? "" : Intl.NumberFormat("en", { notation: "compact" }).format(n); }
+function fmtDate(d) { return d ? new Date(d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}) : ""; }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+// ---- instant preview: thumbnail straight from the video id ----
+function setThumb(src, fallback) {
+  const img = $("thumb");
+  img.classList.remove("loaded");
+  img.onload = () => {
+    if (img.naturalWidth <= 120 && fallback) { const f = fallback; fallback = null; img.src = f; return; }
+    img.classList.add("loaded"); $("thumbSk").classList.add("hidden");
+  };
+  img.onerror = () => { if (fallback) { const f = fallback; fallback = null; img.src = f; } };
+  img.src = src;
+}
+
+function resetCard(id) {
+  $("result").classList.remove("hidden");
+  $("thumbSk").classList.remove("hidden");
+  $("duration").classList.add("hidden");
+  $("title").innerHTML = '<div class="sk line" style="width:90%"></div><div class="sk line" style="width:60%"></div>';
+  $("channel").innerHTML = '<span class="sk" style="display:inline-block;width:120px;height:14px"></span>';
+  $("stats").innerHTML = '<span class="sk" style="width:80px;height:24px;border-radius:999px"></span><span class="sk" style="width:110px;height:24px;border-radius:999px"></span>';
+  $("formats").innerHTML = Array(5).fill('<div class="sk fmtrow"></div>').join("");
+  $("ffWarn").classList.add("hidden");
+  if (id) setThumb(`https://i.ytimg.com/vi/${id}/maxresdefault.jpg`, `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
+}
+
+async function fetchVideo(url) {
+  url = url.trim();
+  showError("");
+  const m = url.match(ID_RE);
+  if (!/youtu\.?be/i.test(url)) { showError("That doesn't look like a YouTube link."); return; }
+  const token = ++current.token;
+  current = { url, data: null, tab: current.tab, token };
+  resetCard(m && m[1]);
+  $("fetchBtn").disabled = true;
+
+  // Title and channel arrive quickly via oEmbed, the formats take a few seconds
+  fetch("/api/quick?url=" + encodeURIComponent(url)).then(r => r.json()).then(q => {
+    if (token !== current.token || current.data) return;
+    if (q.title) $("title").textContent = q.title;
+    if (q.channel) $("channel").textContent = q.channel;
+  }).catch(() => {});
+
+  try {
+    const r = await fetch("/api/info?url=" + encodeURIComponent(url));
+    const data = await r.json();
+    if (token !== current.token) return;
+    if (!r.ok) throw new Error(data.error || "Couldn't fetch this video.");
+    current.data = data;
+    renderInfo(data);
+  } catch (e) {
+    if (token !== current.token) return;
+    showError(e.message);
+    $("formats").innerHTML = "";
+  } finally {
+    if (token === current.token) $("fetchBtn").disabled = false;
+  }
+}
+
+function renderInfo(d) {
+  $("title").textContent = d.title || "Untitled";
+  $("channel").textContent = d.channel || "";
+  if (!$("thumb").classList.contains("loaded") && d.thumbnail) setThumb(d.thumbnail);
+  if (d.duration) { $("duration").textContent = fmtDuration(d.duration); $("duration").classList.remove("hidden"); }
+  const chips = [];
+  if (d.views != null) chips.push(fmtNum(d.views) + " views");
+  if (d.likes != null) chips.push(fmtNum(d.likes) + " likes");
+  if (d.upload_date) chips.push(fmtDate(d.upload_date));
+  if (d.video.length) chips.push("Up to " + d.video[0].label);
+  $("stats").innerHTML = chips.map(c => `<span class="chip">${esc(c)}</span>`).join("");
+  $("ffWarn").classList.toggle("hidden", d.ffmpeg);
+  renderFormats();
+}
+
+function renderFormats() {
+  const d = current.data; if (!d) return;
+  const list = current.tab === "video" ? d.video : d.audio;
+  if (!list.length) { $("formats").innerHTML = '<div class="sub" style="color:var(--muted)">No formats available.</div>'; return; }
+  $("formats").innerHTML = list.map(f => {
+    const badgeCls = { "2K": "K2", "4K": "K4", "8K": "K8" }[f.badge] || f.badge;
+    const sub = f.kind === "video"
+      ? [f.fps ? f.fps + " fps" : "", f.codec ? f.codec.toUpperCase() : "", "MP4"].filter(Boolean).join(" · ")
+      : esc(f.detail || "");
+    return `<div class="fmt" data-id="${esc(f.id)}">
+      <span class="badge ${esc(badgeCls)}">${esc(f.badge)}</span>
+      <div><div class="name">${esc(f.label)}</div><div class="sub">${sub}</div></div>
+      <span class="size">${f.size ? "~" + fmtBytes(f.size) : ""}</span>
+      <button class="btn" data-dl="${esc(f.id)}">Download</button>
+      <span class="bar"></span>
+    </div>`;
+  }).join("");
+}
+
+async function startDownload(formatId, row) {
+  const btn = row.querySelector(".btn"), bar = row.querySelector(".bar");
+  btn.disabled = true; btn.textContent = "Starting…";
+  try {
+    const r = await fetch("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: current.url, format: formatId }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error);
+    poll(data.job, btn, bar, row);
+  } catch (e) { btn.disabled = false; btn.textContent = "Download"; toast(e.message || "Download failed"); }
+}
+
+function poll(job, btn, bar, row) {
+  const tick = async () => {
+    let p;
+    try { p = await (await fetch("/api/progress/" + job)).json(); } catch { return setTimeout(tick, 1000); }
+    if (p.status === "error") { btn.disabled = false; btn.textContent = "Retry"; bar.style.width = "0"; toast(p.error || "Download failed"); return; }
+    if (p.status === "done") {
+      row.classList.add("done"); bar.style.width = "100%";
+      btn.disabled = false; btn.textContent = "Show file"; btn.classList.add("saved");
+      btn.onclick = (e) => { e.stopPropagation(); openFolder(p.filename); };
+      toast("Saved: " + (p.name || "file"));
+      return;
+    }
+    bar.style.width = (p.percent || 0) + "%";
+    if (p.status === "processing") btn.textContent = "Finishing…";
+    else if (p.status === "downloading") btn.textContent = Math.round(p.percent || 0) + "%" + (p.speed ? " · " + fmtBytes(p.speed) + "/s" : "");
+    setTimeout(tick, 600);
+  };
+  tick();
+}
+
+async function openFolder(file) {
+  await fetch("/api/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file }) });
+}
+
+// ---- wiring ----
+$("form").addEventListener("submit", (e) => { e.preventDefault(); fetchVideo($("url").value); });
+$("url").addEventListener("paste", () => setTimeout(() => fetchVideo($("url").value), 0));
+$("pasteBtn").addEventListener("click", async () => {
+  try { const t = await navigator.clipboard.readText(); $("url").value = t; fetchVideo(t); }
+  catch { $("url").focus(); toast("Press Ctrl+V to paste"); }
+});
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
+  current.tab = t.dataset.tab; renderFormats();
+}));
+$("formats").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-dl]");
+  if (b && !b.classList.contains("saved")) startDownload(b.dataset.dl, b.closest(".fmt"));
+});
+$("openFolder").addEventListener("click", () => openFolder());
+$("saveFolder").addEventListener("click", async () => {
+  const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder: $("folder").value }) });
+  const d = await r.json();
+  if (!r.ok) return toast(d.error);
+  $("folder").value = d.folder; toast("Downloads will go to " + d.folder);
+});
+fetch("/api/settings").then(r => r.json()).then(d => { $("folder").value = d.folder; });
+</script>
+</body>
+</html>
